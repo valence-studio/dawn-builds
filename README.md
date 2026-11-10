@@ -7,7 +7,9 @@ download it instead of compiling Dawn (an hour or more, with Python, Go and Ninj
 machine.
 
 - `DAWN_REF`: the google/dawn tag or commit that is built.
-- `BUILD_REV`: bump to rebuild the same Dawn with different options.
+- `BUILD_REV`: bump to rebuild the same Dawn with different options. r2 adds
+  `d3dcompiler_47.dll` (the Windows SDK's redistributable shader compiler) next to
+  `webgpu_dawn.dll` on Windows, where Dawn loads it from.
 - `.github/workflows/build.yml`: builds and publishes release `dawn-<DAWN_REF>-r<BUILD_REV>`
   with `dawn-<platform>.tar.gz` and its SHA-256.
 

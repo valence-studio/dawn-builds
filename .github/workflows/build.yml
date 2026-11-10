@@ -98,6 +98,18 @@ jobs:
         run: |
           cmake --install out --config Release
           cp dawn/LICENSE pkg/LICENSE
+          if [ "$RUNNER_OS" = Windows ]; then
+            # Dawn's D3D backends load d3dcompiler_47.dll from next to webgpu_dawn.dll (its
+            # build copies the Windows SDK's redistributable there), but install leaves it
+            # out. Ship it alongside, as Dawn intends; Microsoft allows redistributing it.
+            fxc=$(find out -iname d3dcompiler_47.dll | head -n1)
+            if [ -z "$fxc" ]; then
+              fxc="/c/Program Files (x86)/Windows Kits/10/Redist/D3D/x64/d3dcompiler_47.dll"
+            fi
+            test -f "$fxc" || { echo "::error::d3dcompiler_47.dll not found"; exit 1; }
+            echo "Shipping $fxc"
+            cp "$fxc" pkg/bin/d3dcompiler_47.dll
+          fi
           cat > pkg/BUILD_INFO.txt <<EOF
           dawn_ref: ${{ steps.v.outputs.ref }}
           dawn_commit: $(git -C dawn rev-parse HEAD)
