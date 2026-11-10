@@ -34,7 +34,8 @@ jobs:
           - platform: linux-x64
             # Oldest supported image, so the library runs on older glibc.
             os: ubuntu-22.04
-            extra: -DDAWN_USE_X11=OFF -DDAWN_USE_WAYLAND=OFF
+            # GCC 11 can't scan C++20 modules; skip Dawn's optional module target.
+            extra: -DDAWN_USE_X11=OFF -DDAWN_USE_WAYLAND=OFF -DDAWN_SUPPORTS_CXX_MODULES=OFF
           - platform: macos-arm64
             os: macos-latest
             extra: -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
@@ -84,7 +85,6 @@ jobs:
           -DBUILD_SHARED_LIBS=OFF
           -DDAWN_BUILD_SAMPLES=OFF
           -DDAWN_BUILD_TESTS=OFF
-          -DDAWN_BUILD_NODE=OFF
           -DDAWN_USE_GLFW=OFF
           -DTINT_BUILD_TESTS=OFF
           -DTINT_BUILD_CMD_TOOLS=OFF
