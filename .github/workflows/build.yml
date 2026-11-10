@@ -1,0 +1,152 @@
+name: Build Dawn
+
+# Builds Google's Dawn (WebGPU) as one shared library per platform and publishes it as a
+# GitHub release, so projects can download it instead of building Dawn themselves.
+#
+# To publish a new build: change DAWN_REF (a google/dawn tag or commit) and/or BUILD_REV
+# (bump it to rebuild the same Dawn with different options), then push to main.
+# Release tag: dawn-<DAWN_REF>-r<BUILD_REV>. Assets: dawn-<platform>.tar.gz plus .sha256.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Dawn (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            os: windows-latest
+            extra: -DDAWN_USE_BUILT_DXC=OFF
+          - platform: linux-x64
+            # Oldest supported image, so the library runs on older glibc.
+            os: ubuntu-22.04
+            extra: -DDAWN_USE_X11=OFF -DDAWN_USE_WAYLAND=OFF
+          - platform: macos-arm64
+            os: macos-latest
+            extra: -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read versions
+        id: v
+        run: |
+          echo "ref=$(tr -d '[:space:]' < DAWN_REF)" >> "$GITHUB_OUTPUT"
+          echo "rev=$(tr -d '[:space:]' < BUILD_REV)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Dawn
+        uses: actions/checkout@v4
+        with:
+          repository: google/dawn
+          ref: ${{ steps.v.outputs.ref }}
+          path: dawn
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Ninja (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: >
+          cmake -S dawn -B out -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/pkg"
+          -DDAWN_FETCH_DEPENDENCIES=ON
+          -DDAWN_ENABLE_INSTALL=ON
+          -DDAWN_BUILD_MONOLITHIC_LIBRARY=SHARED
+          -DBUILD_SHARED_LIBS=OFF
+          -DDAWN_BUILD_SAMPLES=OFF
+          -DDAWN_BUILD_TESTS=OFF
+          -DDAWN_BUILD_NODE=OFF
+          -DDAWN_USE_GLFW=OFF
+          -DTINT_BUILD_TESTS=OFF
+          -DTINT_BUILD_CMD_TOOLS=OFF
+          -DTINT_BUILD_BENCHMARKS=OFF
+          ${{ matrix.extra }}
+
+      - name: Build
+        run: cmake --build out --config Release
+
+      - name: Package
+        run: |
+          cmake --install out --config Release
+          cp dawn/LICENSE pkg/LICENSE
+          cat > pkg/BUILD_INFO.txt <<EOF
+          dawn_ref: ${{ steps.v.outputs.ref }}
+          dawn_commit: $(git -C dawn rev-parse HEAD)
+          build_rev: ${{ steps.v.outputs.rev }}
+          platform: ${{ matrix.platform }}
+          built_by: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          echo "Package contents:"; find pkg -maxdepth 3 | sort | head -60
+          tar -czf "dawn-${{ matrix.platform }}.tar.gz" -C pkg .
+          if command -v sha256sum >/dev/null; then sum=sha256sum; else sum="shasum -a 256"; fi
+          $sum "dawn-${{ matrix.platform }}.tar.gz" | cut -d' ' -f1 > "dawn-${{ matrix.platform }}.tar.gz.sha256"
+          ls -la dawn-*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dawn-${{ matrix.platform }}
+          path: dawn-${{ matrix.platform }}.tar.gz*
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ref=$(tr -d '[:space:]' < DAWN_REF)
+          rev=$(tr -d '[:space:]' < BUILD_REV)
+          tag="dawn-${ref}-r${rev}"
+          ls -la artifacts
+          {
+            echo "Dawn \`${ref}\` (google/dawn), build revision ${rev}."
+            echo
+            echo "One shared library per platform, with headers and CMake config."
+            echo "Built by ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo "| Asset | SHA-256 |"
+            echo "|---|---|"
+            for f in artifacts/*.sha256; do echo "| $(basename "${f%.sha256}") | \`$(cat "$f")\` |"; done
+          } > notes.md
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" artifacts/* --clobber
+          else
+            gh release create "$tag" artifacts/* --title "$tag" --notes-file notes.md
+          fi
