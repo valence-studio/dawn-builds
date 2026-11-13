@@ -9,11 +9,13 @@ machine.
 - `DAWN_REF`: the google/dawn tag or commit that is built.
 - `BUILD_REV`: bump to rebuild the same Dawn with different options. r2 adds
   `d3dcompiler_47.dll` (the Windows SDK's redistributable shader compiler) next to
-  `webgpu_dawn.dll` on Windows, where Dawn loads it from.
+  `webgpu_dawn.dll` on Windows, where Dawn loads it from. r3 builds Linux on AlmaLinux 8, so the
+  library runs on glibc 2.28 with GCC 8's libstdc++ (RHEL/Rocky/Alma 8 and 9, and newer).
 - `.github/workflows/build.yml`: builds and publishes release `dawn-<DAWN_REF>-r<BUILD_REV>`
   with `dawn-<platform>.tar.gz` and its SHA-256.
 
-Platforms: `windows-x64` (MSVC), `linux-x64` (Ubuntu 22.04), `macos-arm64`.
+Platforms: `windows-x64` (MSVC), `linux-x64` (AlmaLinux 8 with Clang and the GCC 13 toolset;
+needs glibc 2.28 and GLIBCXX 3.4.25 at most), `macos-arm64`.
 
 Each package holds `include/` (webgpu.h, the C++ wrapper and the `dawn/native/*` interop
 headers), the library under `bin/` or `lib/`, CMake config under `lib/cmake/Dawn`, Dawn's
